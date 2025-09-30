@@ -141,7 +141,7 @@ body {
 
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
-// === الأسئلة ===
+// ========== الأسئلة (نفسها + إضافتين لمواعيد التمرين) ==========
 const questions = [
   {text:"العمر (سنوات)", type:"number", min:1, max:120},
   {text:"الجنس", type:"select", options:["ذكر","انثى"]},
@@ -182,10 +182,13 @@ const questions = [
   {text:"أعراض جفاف (صداع/تعب/تشنجات)؟", type:"select", options:["نعم","لا"], default:"لا"},
   {text:"متوسط معدل ضربات القلب أثناء التمرين (BPM)", type:"number", min:0, max:220, default:0},
   {text:"وقت الاستيقاظ (HH:MM)", type:"time", default:"06:00"},
-  {text:"وقت النوم (HH:MM)", type:"time", default:"22:30"}
+  {text:"وقت النوم (HH:MM)", type:"time", default:"22:30"},
+  // إضافة حقلي التمرين هنا في نهاية الأسئلة
+  {text:"موعد بداية التمرين (HH:MM)", type:"time", default:"17:00"},
+  {text:"موعد نهاية التمرين (HH:MM)", type:"time", default:"18:00"}
 ];
 
-// === عرض الأسئلة ===
+// ========== عرض الأسئلة =============
 const container = document.getElementById('questionContainer');
 let answers = [];
 let lastAnsweredIndex = -1;
@@ -229,6 +232,7 @@ function createQuestionElement(obj, index){
 }
 
 function validateInput(value, obj){
+  if(!value && value!==0) return false;
   if(obj.type==="number"){
     const num=parseFloat(value);
     if(isNaN(num)) return false;
@@ -274,72 +278,231 @@ container.appendChild(firstQ);
 setTimeout(()=>firstQ.classList.add('show'),50);
 firstQ.querySelector('input,select').focus();
 
-// === الحساب وإظهار النتائج ===
+// ========== وظائف مساعدة للوقت ===========
+function parseHMToMinutes(hm){
+  if(!hm) return null;
+  const parts = hm.split(':').map(s=>parseInt(s,10));
+  if(parts.length!==2 || isNaN(parts[0]) || isNaN(parts[1])) return null;
+  return parts[0]*60 + parts[1];
+}
+function minutesToHM(mins){
+  mins = ((mins % (24*60)) + (24*60)) % (24*60);
+  const h = Math.floor(mins/60);
+  const m = Math.floor(mins%60);
+  return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+}
+function addMinutesToDate(date, mins){
+  return new Date(date.getTime() + mins*60000);
+}
+
+// ========== الحساب وإظهار النتائج (مع دمج التمرين) ===========
 function showResult(){
-  let user={}; questions.forEach((q,i)=>{user[i]=answers[i];});
-  let base = parseFloat(user[2]*0.033*0.94);
-  if(user[4] && parseFloat(user[4])<15) base+=base*0.05;
-  if(user[1]==="انثى") base-=base*0.10;
-  if(user[0]>40) base+=0.05;
-  base += (parseFloat(user[6]||3)*0.2)+((parseFloat(user[7]||45)/60)*0.8);
-  if(parseFloat(user[8]||6)>7 || parseFloat(user[44]||0)>150) base*=1.12;
+  // جمع الإجابات في كائن user
+  let user = {};
+  questions.forEach((q,i)=> user[i] = answers[i]);
+
+  // حساب القاعدة (نفس المعادلة الأصلية مع تعديلات طفيفة للحفاظ على سلوكك)
+  let base = parseFloat(user[2] * 0.033 * 0.94); // وزن * 0.033 * تصحيح
+  if(user[4] && parseFloat(user[4]) < 15) base += base*0.05;
+  if(user[1]==="انثى") base -= base*0.10;
+  if(user[0] > 40) base += 0.05;
+  base += (parseFloat(user[6]||3)*0.2) + ((parseFloat(user[7]||45)/60)*0.8);
+  if(parseFloat(user[8]||6) > 7 || parseFloat(user[44]||0) > 150) base *= 1.12;
   if(user[9]==="نعم" && user[10] && user[11]){
-    let sweat=(parseFloat(user[10])-parseFloat(user[11]))+parseFloat(user[13]||0);
+    let sweat = (parseFloat(user[10]) - parseFloat(user[11])) + parseFloat(user[13]||0);
     base += sweat*(parseFloat(user[6]||3)/7);
   }
-  if(parseFloat(user[22]||0)>400) base+=0.2;
-  if(user[19]==="نعم") base+=0.7;
-  if(user[20] && user[20].toLowerCase().includes("creat")) base+=0.25;
-  if(parseFloat(user[29]||7)<7 || user[30]==="نعم") base+=0.2;
-  if(user[34]==="غامق") base+=0.5;
-  if(user[36]==="نعم") base+=0.4;
-  base=Math.max(2.0, Math.min(base,6.0));
-  base=Math.round(base*100)/100;
+  if(parseFloat(user[22]||0) > 400) base += 0.2;
+  if(user[19]==="نعم") base += 0.7;
+  if(user[20] && user[20].toLowerCase().includes("creat")) base += 0.25;
+  if(parseFloat(user[29]||7) < 7 || user[30]==="نعم") base += 0.2;
+  if(user[34]==="غامق") base += 0.5;
+  if(user[36]==="نعم") base += 0.4;
+  base = Math.max(2.0, Math.min(base, 6.0));
+  base = Math.round(base*100)/100; // باللتر
 
-  const div=document.createElement('div');
+  // عرض إجمالي الترطيب
+  const div = document.createElement('div');
   div.classList.add('result-card');
-  div.innerHTML=`<strong>💧 الترطيب اليومي المقدر:</strong> ${base} لتر/يوم`;
+  div.innerHTML = `<strong>💧 الترطيب اليومي المقدر:</strong> ${base} لتر/يوم`;
   container.appendChild(div);
   setTimeout(()=>div.classList.add('show'),50);
   div.scrollIntoView({behavior:'smooth', block:'end'});
 
-  const wake_time=user[45]||"06:00";
-  const sleep_time=user[46]||"22:30";
-  let total_ml = base*1000;
-  const wake_dt=new Date(); wake_dt.setHours(parseInt(wake_time.split(":"[0])),parseInt(wake_time.split(":"[1])),0,0);
-  const sleep_dt=new Date(); sleep_dt.setHours(parseInt(sleep_time.split(":"[0])),parseInt(sleep_time.split(":"[1])),0,0);
-  if(sleep_dt<wake_dt) sleep_dt.setDate(sleep_dt.getDate()+1);
-  const total_minutes=(sleep_dt-wake_dt)/60000;
+  // إعدادات الوقت
+  const wakeHM = user[45] || "06:00";
+  const sleepHM = user[46] || "22:30";
+  const workoutStartHM = user[47] || null; // قد تكون undefined
+  const workoutEndHM = user[48] || null;
 
-  const windows = [
+  const wakeM = parseHMToMinutes(wakeHM);
+  const sleepM = parseHMToMinutes(sleepHM);
+  const ws = (wakeM===null? 6*60 : wakeM);
+  const ss = (sleepM===null? 22*60+30 : sleepM);
+
+  // تحضير list الجداول الزمنية
+  let events = []; // كل عنصر {timeMinutes, label, ml}
+
+  const total_ml = Math.round(base * 1000); // إجمالي مل
+
+  // إذا المستخدم أدخل توقيت تمرين صالح
+  let workoutStartM = workoutStartHM? parseHMToMinutes(workoutStartHM) : null;
+  let workoutEndM = workoutEndHM? parseHMToMinutes(workoutEndHM) : null;
+
+  // ضبط حالة لو تمرين يمتد عبر منتصف الليل
+  if(workoutStartM !== null && workoutEndM !== null){
+    // nothing special; we'll use minutes arithmetic modularly
+  } else {
+    workoutStartM = null; workoutEndM = null;
+  }
+
+  // النسب المبدئية (قابلة للتعديل حسب مدة التمرين)
+  let prePerc = 0.10;    // 10% قبل التمرين
+  let duringPerc = 0.15; // 15% أثناء
+  let postPerc = 0.10;   // 10% بعد
+  // إذا مدة التمرين قصيرة جداً، نقلل أثناء التمرين وزود قبل/بعد
+  let workoutDuration = 0;
+  if(workoutStartM !== null && workoutEndM !== null){
+    // حساب الفرق بالمنهج الدوري (قد يمر لليوم التالي)
+    workoutDuration = ((workoutEndM - workoutStartM) + 24*60) % (24*60);
+    if(workoutDuration === 0) workoutDuration = 60; // افتراضي ساعة لو نفس الوقت
+    if(workoutDuration < 15){
+      duringPerc = 0.05;
+      prePerc = 0.12;
+      postPerc = 0.13;
+    } else if(workoutDuration < 30){
+      duringPerc = 0.08;
+      prePerc = 0.11;
+      postPerc = 0.11;
+    } else if(workoutDuration > 90){
+      // تمرين طويل -> نزيد أثناء التمرين قليلاً
+      duringPerc = 0.20;
+      prePerc = 0.08;
+      postPerc = 0.08;
+    }
+  }
+
+  // تأكد أن مجموع النسب لا يتجاوز 0.95 (نترك بقية اليوم على الأقل)
+  let fixedSum = prePerc + duringPerc + postPerc;
+  if(fixedSum > 0.95){
+    const scaleDown = 0.95 / fixedSum;
+    prePerc *= scaleDown; duringPerc *= scaleDown; postPerc *= scaleDown;
+    fixedSum = prePerc + duringPerc + postPerc;
+  }
+
+  // حساب الملي للجزء الخاص بالتمرين
+  const pre_ml = Math.round(total_ml * prePerc);
+  const during_ml = Math.round(total_ml * duringPerc);
+  const post_ml = Math.round(total_ml * postPerc);
+  const rest_ml = total_ml - (pre_ml + during_ml + post_ml);
+
+  // تنظيم الأحداث: نحاول وضع قبل التمرين قبل بداية التمرين بـ 20-45 دقيقة (حسب طول التمرين)
+  function timeBefore(startM, minutesBefore){
+    return (startM - minutesBefore + 24*60) % (24*60);
+  }
+  function timeAfter(endM, minutesAfter){
+    return (endM + minutesAfter) % (24*60);
+  }
+
+  if(workoutStartM !== null && workoutEndM !== null){
+    // قبل التمرين: قبل بداية التمرين بـ preOffset
+    const preOffset = Math.min(60, Math.max(15, Math.floor(workoutDuration/2))); // بين 15 و60 أو نصف المدة
+    events.push({time: timeBefore(workoutStartM, preOffset), label: "قبل التمرين", ml: pre_ml});
+
+    // أثناء التمرين: نقسم during_ml إلى جرعات كل 10-20 دقيقة
+    // عدد جرعات = Math.max(1, Math.ceil(workoutDuration / 15))
+    const numDuringShots = Math.max(1, Math.ceil(workoutDuration / 15));
+    const perDuringShot = Math.round(during_ml / numDuringShots);
+    // توزيع داخل فترة التمرين بالتساوي
+    for(let i=0;i<numDuringShots;i++){
+      // time = start + (i+0.5)*(duration/numShots) لتكون وسط كل جزء
+      const t = (workoutStartM + Math.round((i + 0.5) * (workoutDuration / numDuringShots))) % (24*60);
+      events.push({time: t, label: `أثناء التمرين (${i+1}/${numDuringShots})`, ml: perDuringShot});
+    }
+
+    // بعد التمرين: بعد نهاية التمرين بـ 10-30 دقيقة
+    const postOffset = Math.min(30, Math.max(10, Math.round(workoutDuration/4)));
+    events.push({time: timeAfter(workoutEndM, postOffset), label: "بعد التمرين", ml: post_ml});
+  }
+
+  // توزيع الباقي rest_ml على فترات اليوم (نقسم إلى مجموعة نُسميات ثابتة)
+  // نستخدم نفس الـ windows الأساسية لكن نزيل الحقول المتعلقة بالتمرين لأننا أضفناها مسبقًا
+  const dailyWindows = [
     ["استيقاظ",0.20], ["تحضير الصباح",0.06], ["إفطار",0.14], ["سناك صباحي",0.06],
-    ["غداء",0.14], ["سناك بعد الظهر",0.09], ["قبل التمرين",0.06],
-    ["أثناء التمرين",0.14], ["بعد التمرين",0.09], ["عشاء",0.11], ["سناك مسائي",0.05],
-    ["قبل النوم",0.05]
+    ["غداء",0.14], ["سناك بعد الظهر",0.09], /* قبل/أثناء/بعد التمرين محسوبة منفردة */ ["عشاء",0.11], ["سناك مسائي",0.05], ["قبل النوم",0.05]
   ];
 
-  let scheduleDiv=document.createElement('div');
+  // نحسب دقائق النشاط بين الاستيقاظ والنوم
+  let totalActiveMinutes = ((ss - ws) + 24*60) % (24*60);
+  if(totalActiveMinutes === 0) totalActiveMinutes = 24*60;
+
+  // نجمع الفترات غير التمرينية إلى مصفوفة ونوزع rest_ml بالتناسب
+  // نتحكم بمواقعهم الزمنية: نضعهم كنقاط متساوية بين الاستيقاظ والنوم، مع تخطي منطقة التمرين (حتى لا نكرر)
+  // سنقسم rest_ml إلى N أجزاء متساوية حيث N = عدد dailyWindows الصالحة
+  const usableWindows = dailyWindows; // هنا نسميهم ثابتين
+  const N = usableWindows.length;
+  const perWindow_ml = Math.floor(rest_ml / N);
+  let remainder = rest_ml - (perWindow_ml * N);
+
+  // نحسب مواقع هذه النوافذ زمنياً كوقت = wake + i*(activeMinutes/(N+1))
+  for(let i=1;i<=N;i++){
+    let t = (ws + Math.round(i * (totalActiveMinutes / (N + 1)))) % (24*60);
+    // إذا هذا الوقت يدخل ضمن فترة التمرين، نحركه قبل/بعد التمرين بـ10 دقائق
+    if(workoutStartM !== null && workoutEndM !== null){
+      // تحقق إن t داخل فترة التمرين (دائري)
+      const inWorkout = ((t - workoutStartM + 24*60) % (24*60)) < workoutDuration;
+      if(inWorkout){
+        // نحاول إزاحته إلى ما بعد التمرين بــ postOffset+5
+        t = (workoutEndM + Math.min(15, Math.round(workoutDuration/6)) + (i%3)*5) % (24*60);
+      }
+    }
+    let amount = perWindow_ml + (remainder>0?1:0);
+    if(remainder>0) remainder--;
+    events.push({time: t, label: usableWindows[i-1][0], ml: amount});
+  }
+
+  // الآن نرتب الأحداث زمنياً وندمج الأحداث ذات الأوقات المتطابقة (نجمع المل)
+  events.sort((a,b)=> {
+    const diff = ((a.time - b.time + 24*60) % (24*60)) - ((b.time - a.time + 24*60) % (24*60));
+    // simpler: compare numeric in 0..1439
+    return ((a.time - b.time + 24*60) % (24*60)) - ((b.time - a.time + 24*60) % (24*60));
+  });
+
+  // تصحيح طريقة الفرز أعلاه (الطريقة السابقة غير سليمة في كل المتصفحات)، نفصل بتحويل إلى قيمة 0..1439 ثانياً
+  events.sort((a,b)=> a.time - b.time);
+
+  // دمج نفس الأوقات
+  const merged = [];
+  events.forEach(ev=>{
+    const last = merged.length? merged[merged.length-1] : null;
+    if(last && last.time === ev.time){
+      last.ml += ev.ml;
+      last.label = last.label + " / " + ev.label;
+    } else {
+      merged.push({time: ev.time, label: ev.label, ml: ev.ml});
+    }
+  });
+
+  // أخيراً: إنشاء عنصر الجدول المرئي
+  let scheduleDiv = document.createElement('div');
   scheduleDiv.classList.add('schedule-card');
   scheduleDiv.id = "scheduleCard";
-  scheduleDiv.innerHTML="<strong>🕒 جدول الترطيب اليومي:</strong><br><br>";
-  let current_time = new Date(wake_dt);
-  const interval = total_minutes/windows.length;
+  scheduleDiv.innerHTML = "<strong>🕒 جدول الترطيب اليومي (متضمن التمرين):</strong><br><br>";
 
-  windows.forEach(w=>{
-    const t = new Date(current_time);
-    const ml=Math.round(total_ml*w[1]);
+  merged.forEach(it=>{
     const line = document.createElement('div');
     line.style.margin = "6px 0";
     line.style.display = "flex";
     line.style.justifyContent = "space-between";
     line.style.gap = "10px";
-    line.innerHTML = `<span style="opacity:0.9;">${t.getHours().toString().padStart(2,'0')}:${t.getMinutes().toString().padStart(2,'0')}</span>
-                      <span style="flex:1;text-align:center;font-weight:600">${w[0]}</span>
-                      <span style="opacity:0.9;">${ml} ml</span>`;
+    const mlRounded = Math.round(it.ml);
+    line.innerHTML = `<span style="opacity:0.9;">${minutesToHM(it.time)}</span>
+                      <span style="flex:1;text-align:center;font-weight:600">${it.label}</span>
+                      <span style="opacity:0.9;">${mlRounded} ml</span>`;
     scheduleDiv.appendChild(line);
-    current_time.setMinutes(current_time.getMinutes()+interval);
   });
 
+  // زر تحميل كما في النسخة المحسنة
   const btn = document.createElement("button");
   btn.classList.add("download-btn");
   btn.setAttribute("title", "تحميل الجدول كصورة");
@@ -350,7 +513,7 @@ function showResult(){
       btn.classList.add("busy");
       btn.innerHTML = "⏳";
 
-      // حفظ الستيلات الحالية ثم تعطيل الظلال والتأثيرات التي قد تؤثر على الصورة
+      // حفظ الستيلات الحالية ثم تعطيل الظلال/التأثيرات التي قد تؤثر على الصورة
       const prevBoxShadow = scheduleDiv.style.boxShadow;
       const prevTransform = scheduleDiv.style.transform;
       const prevFilter = scheduleDiv.style.filter;
